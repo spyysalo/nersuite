@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "sentence_tagger.h"
 #include "../nersuite_common/string_utils.h"
 
@@ -6,8 +8,14 @@ using namespace std;
 namespace NER
 {
 	size_t	SentenceTagger::max_ne_len = 10;
-	bool	SentenceTagger::filter_NN = true;
 	int		SentenceTagger::normalize_type = NormalizeNone;
+
+	vector<string> SentenceTagger::require_exact_POS = vector<string>();
+	vector<string> SentenceTagger::require_prefix_POS = vector<string>();
+	vector<string> SentenceTagger::disallow_exact_POS = vector<string>();
+	vector<string> SentenceTagger::disallow_prefix_POS = vector<string>();
+	bool SentenceTagger::filter_require_POS = false;
+	bool SentenceTagger::filter_disallow_POS = false;
 
 	SentenceTagger::SentenceTagger()
 	{
@@ -167,15 +175,23 @@ namespace NER
 	int SentenceTagger::find_longest(size_t i_row, NE& ne, const Dictionary& dict) const
 	{
 		size_t	key_min_len = 0;
-		size_t	key_len = max_ne_len;
-
-		// Find the minimum length of a key that includes NN-POS tag
-		if (filter_NN && ((key_min_len = find_min_length(i_row)) == (size_t)(-1)))
+		size_t	key_max_len = i_row + max_ne_len;
+		
+		// Find minimum length that includes required POS
+		if (filter_require_POS && (key_min_len = find_min_length(i_row)) == (size_t)(-1))
 		{
 			return 0;
 		}
 
-		if ((i_row + max_ne_len) > size())
+		// Find maximum length that does not include disallowed POS
+		if (filter_disallow_POS && (key_max_len = find_max_length(i_row)) == 0)
+		{
+			return 0;
+		}
+
+		size_t	key_len = key_max_len;
+		
+		if ((i_row + key_len) > size())
 		{
 			// Make it sure that key generation does not encounter vector end boundary error
 			key_len = size() - i_row;
@@ -234,11 +250,52 @@ namespace NER
 
 		for (size_t col = i_row ; col < end; ++col)
 		{
-			if (m_Content[col][POS_COL].substr(0, 2) == "NN") 
+			// exact match
+			if (find(require_exact_POS.begin(), require_exact_POS.end(),
+				 m_Content[col][POS_COL]) != require_exact_POS.end())
 			{
 				return col - i_row;
+			}			   
+			// prefix match
+			for (vector<string>::iterator i = require_prefix_POS.begin();
+			     i != require_prefix_POS.end(); ++i)
+			{
+				if (m_Content[col][POS_COL].substr(0, (*i).length()) == *i)
+				{
+					return col - i_row;
+				}
 			}
 		}
 		return (size_t)(-1);
+	}
+
+	size_t SentenceTagger::find_max_length(size_t i_row) const
+	{
+		size_t end = i_row + max_ne_len;
+
+		if (end >= size())
+		{
+			end = size();
+		}
+
+		for (size_t col = i_row ; col < end; ++col)
+		{
+			// exact match
+			if (find(disallow_exact_POS.begin(), disallow_exact_POS.end(),
+				 m_Content[col][POS_COL]) != disallow_exact_POS.end())
+			{
+				return col - i_row;
+			}			   
+			// prefix match
+			for (vector<string>::iterator i = disallow_prefix_POS.begin();
+			     i != disallow_prefix_POS.end(); ++i)
+			{
+				if (m_Content[col][POS_COL].substr(0, (*i).length()) == *i)
+				{
+					return col - i_row;
+				}
+			}
+		}
+		return end - i_row;
 	}
 }

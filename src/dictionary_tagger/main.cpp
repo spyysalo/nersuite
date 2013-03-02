@@ -56,6 +56,12 @@ void print_usage()
 		"       cns: Case AND Number AND Symbol insensitive (convert all symbols to \'_\')\n"
 		"       t: Use token-base matching\n"
 		"\n"
+		"    -p <POS_filter> : Part-of-speech filter for dictionary matching.\n"
+		"       none: No part-of-speech filtering\n"
+		"       TAG1[,TAG2[...]]: require one of TAG1, TAG2, ...\n"
+		"       TAG1[,-TAG2[...]]: require TAG1, disallow TAG2, ...\n"
+		"       (\"*\" is suffix wildcard; default \"NN*\")\n"
+		"\n"
 		"    -multidoc SEPARATOR : look for lines beginning with the separator string \n"
 		"       SEPARATOR in input and echo the same on output.\n"
 		"\n"
@@ -67,6 +73,55 @@ void print_usage()
 		"         [5th col.] - POS tag\n"
 		"         [6th col.] - chunk tag\n"
 		"         [7th ... ] - any attributes\n";
+}
+
+/* parse -p argument */
+bool parse_pos_filter_string(string filter_string,
+			     vector<string>& require_exact,
+			     vector<string>& require_prefix,
+			     vector<string>& disallow_exact,
+			     vector<string>& disallow_prefix)
+{
+	stringstream filter_stream(filter_string);
+	string tag;
+
+	while ( getline(filter_stream, tag, ',') ) // split by ','
+	{
+		if ( tag.length() == 0 ) 
+		{
+			continue;
+		}
+		bool disallow = false;
+		if ( tag[0] == '-' )
+		{
+			disallow = true;
+			tag = tag.substr(1);
+		}
+		unsigned wildcard = tag.find("*");
+		if ( wildcard != string::npos )
+		{
+			if ( disallow )
+			{
+				disallow_prefix.push_back(tag.substr(0, wildcard));
+			}
+			else
+			{
+				require_prefix.push_back(tag.substr(0, wildcard));
+			}
+		}
+		else
+		{
+			if ( disallow )
+			{
+				disallow_exact.push_back(tag);
+			}
+			else
+			{
+				require_exact.push_back(tag);
+			}
+		}
+	}
+	return true;
 }
 
 int main(int argc, char* argv[])
@@ -110,6 +165,9 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	string pos_filter = "NN*";	
+	opt_parser.get_value("-p", pos_filter);
+
 	string	multidoc_separator = "";
 	bool	multidoc_mode = opt_parser.get_value("-multidoc", multidoc_separator);
 
@@ -132,6 +190,14 @@ int main(int argc, char* argv[])
 		}
 		
 		NER::SentenceTagger::set_normalize_type(normalize_type);
+
+		if ( pos_filter == "none" ) {
+			NER::SentenceTagger::set_POS_filter();  // no filters
+		} else {
+			vector<string> re, rp, de, dp;
+			parse_pos_filter_string(pos_filter, re, rp, de, dp);
+			NER::SentenceTagger::set_POS_filter(re, rp, de, dp);
+		}
 
 		// Tag input with a dictionary
 		NER::SentenceTagger	one_sent;

@@ -65,8 +65,15 @@ namespace NER
 		typedef std::vector< std::vector<std::string> >	V2_STR;
 
 		static size_t	max_ne_len;
-		static bool		filter_NN;
 		static int		normalize_type;
+
+		// POS filter-related data (see set_POS_filter())
+		static std::vector<std::string> require_exact_POS;
+		static std::vector<std::string> require_prefix_POS;
+		static std::vector<std::string> disallow_exact_POS;
+		static std::vector<std::string> disallow_prefix_POS;
+		static bool filter_require_POS;
+		static bool filter_disallow_POS;
 
 		// Sentence Data (Tokenized array)
 		V2_STR	m_Content;
@@ -92,6 +99,30 @@ namespace NER
 		* @param[in] nt A combination of Normalization Types (OR of NormalizeType).
 		*/
 		static void set_normalize_type(int nt) { normalize_type = nt; }
+
+		/**
+		* Set candidate sequence POS tag filter.  Only sequences
+		* containing a POS tag matching any in tag in in_exact or in_prefix
+		* and not containing a POS matching any tag in out_exact or out_prefix
+		* are considered in tagging. Matching against the _prefix list tags is
+		* prefix only, so e.g. "NN" in in_prefix matches "NNS".
+		* @param[in] require_exact Require POS tag matching any
+		* @param[in] require_prefix Require POS tag beginning with any
+		* @param[in] out_exact Disallow POS tag matching any
+		* @param[in] out_prefix Disallow POS tag beginning with any
+		*/
+		static void set_POS_filter(const std::vector<std::string>& require_exact = std::vector<std::string>(),
+					   const std::vector<std::string>& require_prefix = std::vector<std::string>(),
+					   const std::vector<std::string>& disallow_exact = std::vector<std::string>(),
+					   const std::vector<std::string>& disallow_prefix = std::vector<std::string>()) {
+			require_exact_POS = require_exact;
+			require_prefix_POS = require_prefix;
+			disallow_exact_POS = disallow_exact;
+			disallow_prefix_POS = disallow_prefix;
+
+			filter_require_POS = require_exact.size() > 0 || require_prefix.size() > 0;
+			filter_disallow_POS = disallow_exact.size() > 0 || disallow_prefix.size() > 0;
+		}
 
 		/**
 		* Get the size of sentence which this object is currentry processing.
@@ -168,7 +199,12 @@ namespace NER
 
 		int		find_exact(size_t i_row, NE& ne, const Dictionary& dict) const;
 
+		/* Return minimum length of sequence satisfying required POS filter. */
 		size_t	find_min_length(size_t i_row) const;
+
+		/* Return maximum length of sequence not violating disallowed POS filter. */
+		size_t	find_max_length(size_t i_row) const;
+
 	};
 }
 
