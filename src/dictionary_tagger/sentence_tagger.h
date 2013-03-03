@@ -42,6 +42,11 @@
 #define		RAW_TOKEN_COL	2
 #define		POS_COL			4
 
+// Overlap resolution policy constants
+#define		OVL_TAG_LONGEST		0
+#define		OVL_TAG_ALL		1
+
+
 namespace NER
 {
 	/** 
@@ -64,8 +69,9 @@ namespace NER
 	private:
 		typedef std::vector< std::vector<std::string> >	V2_STR;
 
-		static size_t	max_ne_len;
-		static int		normalize_type;
+		static size_t max_ne_len;
+		static int normalize_type;
+		static int overlap_resolution;
 
 		// POS filter-related data (see set_POS_filter())
 		static std::vector<std::string> require_exact_POS;
@@ -99,6 +105,13 @@ namespace NER
 		* @param[in] nt A combination of Normalization Types (OR of NormalizeType).
 		*/
 		static void set_normalize_type(int nt) { normalize_type = nt; }
+
+		/**
+		* Set Overlap resolution policy. Determines how multiple overlapping
+		* dictionary match candidates are handled.
+		* @param[in] o Overlap resolution policy constant.
+		*/
+		static void set_overlap_resolution(int o) { overlap_resolution = o; }
 
 		/**
 		* Set candidate sequence POS tag filter.  Only sequences
@@ -195,9 +208,13 @@ namespace NER
 
 		void	mark_ne(const Dictionary& dict);
 
-		int		find_longest(size_t i_row, NE& ne, const Dictionary& dict) const;
+		std::string make_key(size_t i_row, size_t key_len) const;
 
-		int		find_exact(size_t i_row, NE& ne, const Dictionary& dict) const;
+		bool find_range(size_t i_row, size_t& min_len, size_t& max_len) const;
+
+		int find_longest(size_t i_row, std::vector<NE>& nes, const Dictionary& dict) const;
+
+		int find_exact(size_t i_row, std::vector<NE>& nes, const Dictionary& dict) const;
 
 		/* Return minimum length of sequence satisfying required POS filter. */
 		size_t	find_min_length(size_t i_row) const;

@@ -7,8 +7,9 @@ using namespace std;
 
 namespace NER
 {
-	size_t	SentenceTagger::max_ne_len = 10;
-	int		SentenceTagger::normalize_type = NormalizeNone;
+	size_t SentenceTagger::max_ne_len = 10;
+	int SentenceTagger::normalize_type = NormalizeNone;
+	int SentenceTagger::overlap_resolution = OVL_TAG_LONGEST;
 
 	vector<string> SentenceTagger::require_exact_POS = vector<string>();
 	vector<string> SentenceTagger::require_prefix_POS = vector<string>();
@@ -68,36 +69,28 @@ namespace NER
 
 	void SentenceTagger::tag_nes(const Dictionary& dict)
 	{
-		int	ne_len = 0;
-		NE	one_ne;
-
 		v_ne.clear();
 		v_idx.clear();
 
 		for (size_t i_row = 0; i_row < size(); ++i_row)
 		{
-			if ((normalize_type&NormalizeToken) != 0)
+			vector<NE> nes;
+
+			if ( normalize_type & NormalizeToken )
 			{
-				// Token-base matching
-				// --- try to match each single word of the sentence with single token in the dictionary
-				ne_len = find_exact(i_row, one_ne, dict);
+				find_exact(i_row, nes, dict);
 			}
 			else
 			{
-				// Normal matching
-				// --- try to find the longest sequence of words which matches a dictionary entry
-				ne_len = find_longest(i_row, one_ne, dict);
+				find_longest(i_row, nes, dict);
 			}
-			if (ne_len > 0)
-			{
-				v_ne.push_back(one_ne);
-			}
+			v_ne.insert(v_ne.end(), nes.begin(), nes.end());
 		}
 		resolve_collision();
 		mark_ne(dict);
 	}
 
-	// Exact matching, choose a NE that comes first
+	// Choose NEs to tag based on overlap resolution policy
 	void SentenceTagger::resolve_collision()
 	{
 		int	re_beg = -1;
@@ -105,7 +98,7 @@ namespace NER
 
 		for (size_t idx = 0; idx < num_ne; ++idx)
 		{
-			if (v_ne[idx].begin > re_beg)
+		  	if (overlap_resolution == OVL_TAG_ALL || v_ne[idx].begin > re_beg)
 			{
 				v_idx.push_back(idx);
 				re_beg = v_ne[idx].end;
@@ -135,23 +128,92 @@ namespace NER
 				cls_itr != v_ne[ *itr ].classes.end();
 				++cls_itr)
 			{
+				// 0) Get numeric class identifier and start position
+				const int cls_num = atoi(cls_itr->c_str());
+				int pos = v_ne[ *itr ].begin;
+
+				// Non-"O" tag indicates a preceding multi-token NE
+				// of the same class. Skip processing, giving preference
+				// to leftmost NEs within each class.
+				if ( m_Content[ pos ][ ori_n_col + cls_num ] != "O" )
+				{
+					continue;
+				}
+
 				// 1) Find a descriptive semantic class name
-				const string&	sem_name = dict.get_class_name(atoi(cls_itr->c_str()));
+				const string&	sem_name = dict.get_class_name(cls_num);
 
 				// 2) Label the data
-				int		pos = v_ne[ *itr ].begin;
-				m_Content[ pos ][ ori_n_col + atoi(cls_itr->c_str()) ] = "B-" + sem_name;
+				m_Content[ pos ][ ori_n_col + cls_num ] = "B-" + sem_name;
 
 				for (pos = pos + 1; pos <= v_ne[ *itr ].end; ++pos)
 				{
-					m_Content[ pos ][ ori_n_col + atoi(cls_itr->c_str()) ] = "I-" + sem_name;
+					m_Content[ pos ][ ori_n_col + cls_num ] = "I-" + sem_name;
 				}
 			}
 		}
 	}
 
-	int SentenceTagger::find_exact(size_t i_row, NE& ne, const Dictionary& dict) const
+	bool SentenceTagger::find_range(size_t i_row, size_t& min_len, size_t& max_len) const
 	{
+		min_len = 0;
+		max_len = i_row + max_ne_len;
+
+		// Find minimum length that includes required POS
+		if (filter_require_POS && (min_len = find_min_length(i_row)) == (size_t)(-1))
+		{
+			return 0;
+		}
+
+		// Find maximum length that does not include disallowed POS
+		if (filter_disallow_POS && (max_len = find_max_length(i_row)) == 0)
+		{
+			return 0;
+		}
+		
+		// Protect against vector end boundary error
+		if ((i_row + max_len) > size())
+		{
+			max_len = size() - i_row;
+		}
+
+		// Exclude last period
+		if ((size() == (i_row + max_len)) && (m_Content.back()[RAW_TOKEN_COL] == "."))
+		{
+			--max_len;
+		}
+
+		if ( max_len > min_len )
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	string SentenceTagger::make_key(size_t i_row, size_t key_len) const
+	{
+		string key = m_Content[i_row][RAW_TOKEN_COL];
+
+		for (int idx = 1; idx < key_len; ++idx)
+		{
+			if (m_Content[i_row + idx][BEG_COL] != m_Content[i_row + idx - 1][END_COL])
+			{
+				key += " ";  // Space between two tokens
+			}
+			key += m_Content[i_row + idx][RAW_TOKEN_COL];
+		}
+
+		return key;
+	}
+
+	int SentenceTagger::find_exact(size_t i_row, vector<NE>& nes, const Dictionary& dict) const
+	{
+		// Token-base matching --- try to match each single word of
+		// the sentence with single token in the dictionary
+
 		// Search dictionary
 		string key = m_Content[i_row][RAW_TOKEN_COL];
 
@@ -159,81 +221,54 @@ namespace NER
 		const int *value = dict.get_classes(key, normalize_type, &count);
 		if (value != NULL)
 		{
+			NE ne;
 			ne.begin = i_row;
 			ne.end = i_row;
-			ne.classes.clear();
 			for (int i = 0; i < count; ++i)
 			{
 				ne.classes.push_back(int2str(value[i]));
 			}
 			ne.sim = 1.0;
+			nes.push_back(ne);
 			return 1;
 		}
 		return 0;
 	}
 
-	int SentenceTagger::find_longest(size_t i_row, NE& ne, const Dictionary& dict) const
+	int SentenceTagger::find_longest(size_t i_row, vector<NE>& nes, const Dictionary& dict) const
 	{
-		size_t	key_min_len = 0;
-		size_t	key_max_len = i_row + max_ne_len;
+		// Normal matching --- try to find the longest sequence of
+		// words that matches a dictionary entry
+
+		size_t	key_min_len, key_max_len;
 		
-		// Find minimum length that includes required POS
-		if (filter_require_POS && (key_min_len = find_min_length(i_row)) == (size_t)(-1))
-		{
-			return 0;
-		}
-
-		// Find maximum length that does not include disallowed POS
-		if (filter_disallow_POS && (key_max_len = find_max_length(i_row)) == 0)
-		{
-			return 0;
-		}
-
-		size_t	key_len = key_max_len;
-		
-		if ((i_row + key_len) > size())
-		{
-			// Make it sure that key generation does not encounter vector end boundary error
-			key_len = size() - i_row;
-		}
-
-		if ((size() == (i_row + key_len)) && (m_Content.back()[RAW_TOKEN_COL] == "."))
-		{
-			// Last period will not be searched
-			--key_len;
-		}
+		find_range(i_row, key_min_len, key_max_len);
 
 		// Search dictionary, longer candidate first
-		string	key = "";
+		size_t	key_len = key_max_len;
 		for (; key_len > key_min_len; --key_len)
 		{
 			// 1) Make a key
-			key = m_Content[i_row][RAW_TOKEN_COL];
-
-			for (int idx = 1; idx < key_len; ++idx)
-			{
-				if (m_Content[i_row + idx][BEG_COL] != m_Content[i_row + idx - 1][END_COL])
-				{
-					// Space between two tokens
-					key += " ";
-				}
-				key += m_Content[i_row + idx][RAW_TOKEN_COL];
-			}
+			string key = make_key(i_row, key_len);
 
 			// 2) Search Dictionary
 			size_t count;
 			const int *value = dict.get_classes(key, normalize_type, &count);
 			if (value != NULL)
 			{
+				NE ne;
 				ne.begin = i_row;
-				ne.end = i_row + key_len - 1;			// A range is [begin, end]
-				ne.classes.clear();
+				ne.end = i_row + key_len - 1;	// Range is [begin, end]
 				for (int i = 0; i < count; ++i)
 				{
 					ne.classes.push_back(int2str(value[i]));
 				}
 				ne.sim = 1.0;
-				return key_len;						// Break when the longest is found
+				nes.push_back(ne);
+				if ( overlap_resolution == OVL_TAG_LONGEST )
+				{
+					return key_len;  // Break when longest found
+				}
 			}
 		}
 		return 0;

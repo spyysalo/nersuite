@@ -62,6 +62,10 @@ void print_usage()
 		"       TAG1[,-TAG2[...]]: require TAG1, disallow TAG2, ...\n"
 		"       (\"*\" is suffix wildcard; default \"NN*\")\n"
 		"\n"
+		"    -o <overlap_resolution>: Rule for resolving overlapping matches.\n"
+		"       longest: tag longest of leftmost matches (default)\n"
+		"       all: tag all matches\n"
+		"\n"
 		"    -multidoc SEPARATOR : look for lines beginning with the separator string \n"
 		"       SEPARATOR in input and echo the same on output.\n"
 		"\n"
@@ -134,7 +138,7 @@ int main(int argc, char* argv[])
 		print_usage();
 		exit(1);
 	}
-	int		normalize_type = NER::NormalizationUnknown;
+	int  normalize_type = NER::NormalizationUnknown;
 	string	normalize_option;
 	if (opt_parser.get_value("-n", normalize_option))
 	{
@@ -168,6 +172,23 @@ int main(int argc, char* argv[])
 	string pos_filter = "NN*";	
 	opt_parser.get_value("-p", pos_filter);
 
+	string overlap_option = "longest";
+	opt_parser.get_value("-o", overlap_option);
+	int overlap_resolution;
+	if ( overlap_option == "longest" )
+	{
+		overlap_resolution = OVL_TAG_LONGEST;
+	}
+	else if ( overlap_option == "all" )
+	{
+		overlap_resolution = OVL_TAG_ALL;
+	}
+	else
+	{
+		cerr << "Unrecognized -o parameter value \"" << overlap_option << "\"" << endl;
+		exit(1);
+	}
+
 	string	multidoc_separator = "";
 	bool	multidoc_mode = opt_parser.get_value("-multidoc", multidoc_separator);
 
@@ -190,6 +211,8 @@ int main(int argc, char* argv[])
 		}
 		
 		NER::SentenceTagger::set_normalize_type(normalize_type);
+
+		NER::SentenceTagger::set_overlap_resolution(overlap_resolution);
 
 		if ( pos_filter == "none" ) {
 			NER::SentenceTagger::set_POS_filter();  // no filters
